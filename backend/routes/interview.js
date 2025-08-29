@@ -197,17 +197,31 @@ router.post('/:id/complete', protect, async (req, res) => {
     // Generate overall feedback
     const answeredQuestions = interview.questions.filter(q => q.feedback);
     if (answeredQuestions.length > 0) {
-      const avgScore = answeredQuestions.reduce((sum, q) => sum + q.feedback.score, 0) / answeredQuestions.length;
+      const avgScore = answeredQuestions.reduce((sum, q) => sum + (q.feedback.score || 0), 0) / answeredQuestions.length;
+      const finalScore = isNaN(avgScore) ? 0 : Math.round(avgScore);
       
       interview.overallFeedback = {
-        totalScore: Math.round(avgScore),
-        summary: `You completed ${answeredQuestions.length} out of ${interview.questions.length} questions with an average score of ${Math.round(avgScore)}%.`,
+        totalScore: finalScore,
+        summary: `You completed ${answeredQuestions.length} out of ${interview.questions.length} questions with an average score of ${finalScore}%.`,
         strengths: ['Good communication skills', 'Clear explanations'],
         areasForImprovement: ['Technical depth', 'Specific examples'],
         recommendations: [
           'Practice more technical questions',
           'Prepare STAR method examples',
           'Research company-specific information'
+        ]
+      };
+    } else {
+      // Default feedback when no questions answered
+      interview.overallFeedback = {
+        totalScore: 0,
+        summary: 'No questions were answered in this interview session.',
+        strengths: [],
+        areasForImprovement: ['Complete interview questions', 'Provide detailed answers'],
+        recommendations: [
+          'Start a new interview session',
+          'Take time to answer each question thoroughly',
+          'Practice speaking clearly and confidently'
         ]
       };
     }

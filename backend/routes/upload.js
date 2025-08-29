@@ -1,27 +1,27 @@
 const express = require('express');
 const multer = require('multer');
-const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
-const auth = require('../middleware/auth');
+const path = require('path');
+const fs = require('fs');
+const { protect } = require('../middleware/auth');
 const User = require('../models/User');
 
 const router = express.Router();
 
-// Configure Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, '../uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
-// Configure multer with Cloudinary storage
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'profile-images',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'gif'],
-    transformation: [{ width: 300, height: 300, crop: 'fill' }],
+// Configure multer with local storage
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
   },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'profile-' + uniqueSuffix + path.extname(file.originalname));
+  }
 });
 
 const upload = multer({ 
@@ -41,7 +41,7 @@ const upload = multer({
 // @route   POST /api/upload/profile-image
 // @desc    Upload profile image
 // @access  Private
-router.post('/profile-image', auth, upload.single('profileImage'), async (req, res) => {
+router.post('/profile-image', protect, upload.single('profileImage'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: 'No image file provided' });
@@ -53,20 +53,22 @@ router.post('/profile-image', auth, upload.single('profileImage'), async (req, r
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Delete old image from Cloudinary if it exists
+    // Delete old image file if it exists
     if (user.profile && user.profile.profileImage) {
-      const publicId = user.profile.profileImage.split('/').pop().split('.')[0];
-      await cloudinary.uploader.destroy(`profile-images/${publicId}`);
+      const oldImagePath = path.join(__dirname, '../uploads', path.basename(user.profile.profileImage));
+      if (fs.existsSync(oldImagePath)) {
+        fs.unlinkSync(oldImagePath);
+      }
     }
 
     // Update user with new profile image
     user.profile = user.profile || {};
-    user.profile.profileImage = req.file.path;
+    user.profile.profileImage = `/uploads/${req.file.filename}`;
     await user.save();
 
     res.json({
       message: 'Profile image uploaded successfully',
-      profileImage: req.file.path,
+      profileImage: user.profile.profileImage,
       user: {
         id: user._id,
         name: user.name,
@@ -83,7 +85,7 @@ router.post('/profile-image', auth, upload.single('profileImage'), async (req, r
 // @route   DELETE /api/upload/profile-image
 // @desc    Delete profile image
 // @access  Private
-router.delete('/profile-image', auth, async (req, res) => {
+router.delete('/profile-image', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     if (!user) {
@@ -91,9 +93,11 @@ router.delete('/profile-image', auth, async (req, res) => {
     }
 
     if (user.profile && user.profile.profileImage) {
-      // Delete image from Cloudinary
-      const publicId = user.profile.profileImage.split('/').pop().split('.')[0];
-      await cloudinary.uploader.destroy(`profile-images/${publicId}`);
+      // Delete image file from local storage
+      const imagePath = path.join(__dirname, '../uploads', path.basename(user.profile.profileImage));
+      if (fs.existsSync(imagePath)) {
+        fs.unlinkSync(imagePath);
+      }
 
       // Remove image URL from user profile
       user.profile.profileImage = null;
